@@ -3,9 +3,8 @@ import jdatetime
 import datetime
 import pyromod
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from peewee import fn
-from models.database import Inventory, BagUsage
+from models.database import Inventory, BagUsage, OldInventory
 from constants.bot_messages import (
     WELCOME_MESSAGE,
     HELP_MESSAGE,
@@ -121,10 +120,13 @@ async def report(client, message):
     total_remaining = Inventory.select(fn.SUM(Inventory.bags_remaining)).scalar() or 0
     total_used = total_received - total_remaining
 
+    total_old_rem = OldInventory.select(fn.SUM(OldInventory.bags_remaining)).scalar() or 0
+
     report_text = REOPRT_MESSAGE.format(
         total_received,
         total_used,
         total_remaining,
+        total_old_rem,
     )
 
     for bag_type, persian_name in BAG_TYPE_MAPPING.items():
@@ -132,3 +134,46 @@ async def report(client, message):
         report_text += TOTAL_REPORT_MESSAGE.format(persian_name, used) + '\n'
 
     await message.reply(report_text)
+
+@Client.on_message(filters.command("move_old_bags"))
+async def move_old_bags(client, message):
+    chat_id = message.chat.id
+
+    old_bags = Inventory.select().where(Inventory.bags_remaining > 0)
+
+    if old_bags:
+        try:
+            await message.reply("لطفاً تعداد کیسه هایی که می خواهید به موجودی قدیمی منتقل کنید را وارد کنید:")
+            count_msg = await client.listen(chat_id)
+            count = int(count_msg.text)  # Convert the message text to an integer
+
+            total_bags_remaining = sum(bag.bags_remaining for bag in old_bags)
+            if count > total_bags_remaining:
+                await message.reply(f'تعداد کیسه های موجود برای انتقال کافی نیست. حداکثر تعداد کیسه های قابل انتقال: {total_bags_remaining}')
+                return
+
+            bags_to_move = count
+            for old_bag in old_bags:
+                if bags_to_move <= 0:
+                    break
+                if old_bag.bags_remaining <= bags_to_move:
+                    bags_to_move -= old_bag.bags_remaining
+                    OldInventory.create(
+                        bags_remaining=old_bag.bags_remaining,
+                        date_received=old_bag.date_received
+                    )
+                    old_bag.delete_instance()
+                else:
+                    OldInventory.create(
+                        bags_remaining=bags_to_move,
+                        date_received=old_bag.date_received
+                    )
+                    old_bag.bags_remaining -= bags_to_move
+                    old_bag.save()
+                    bags_to_move = 0
+
+            await message.reply('آرد های قدیمی از کیسه های جدید جدا شدند')
+        except (IndexError, ValueError):
+            await message.reply("لطفاً یک عدد معتبر وارد کنید.")
+    else:
+        await message.reply('کیسه ای برای انتقال در انبار موجود نیست.')
