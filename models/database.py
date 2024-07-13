@@ -20,5 +20,11 @@ class BagUsage(BaseModel):
     phone = CharField(null=True)
     date = DateTimeField(default=datetime.datetime.now)
 
+
+class OldInventory(BaseModel):
+    bags_remaining = IntegerField()
+    date_received = DateTimeField(default=datetime.datetime.now)
+
+
 db.connect()
-db.create_tables([Inventory, BagUsage])
+db.create_tables([Inventory, BagUsage, OldInventory])
